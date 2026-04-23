@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env*
+!.env.example
+
+# Firebase sensitive config
+firebase-applet-config.json
+firebase-blueprint.json
+.firebaserc
+
+# iOS - generated/native build artifacts
+ios/App/App/public/
+ios/App/Pods/
+ios/App/*.xcworkspace/xcuserdata/
+ios/App/*.xcodeproj/xcuserdata/
+ios/App/build/
+ios/App/DerivedData/
+ios/.build/
+ios/App/App/GoogleService-Info.plist
+
+# Capacitor generated config (contains app secrets baked in)
+ios/App/App/capacitor.config.json

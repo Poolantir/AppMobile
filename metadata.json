@@ -1,0 +1,12 @@
+{
+  "name": "Poolantir",
+  "description": "Smart Stall Facility Analytics System for real-time toilet monitoring, reporting, and predictive maintenance.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "Real-time Data",
+    "Analytics Dashboard",
+    "Issue Reporting"
+  ]
+}

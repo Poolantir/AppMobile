@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    background-color: #0f172a;
+  }
+  body {
+    @apply antialiased bg-[#0f172a] text-[#f8fafc] min-h-screen overflow-x-hidden;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+  }
+  
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/20;
+  }
+
+  .mesh-bg {
+    @apply fixed inset-0 -z-10 bg-[#0f172a];
+    background: radial-gradient(circle at 20% 20%, #1e293b 0%, #0f172a 100%);
+  }
+
+  .mesh-accent-1 {
+    @apply fixed -top-[200px] -right-[100px] w-[600px] h-[600px] bg-sky-500/10 blur-[120px] rounded-full -z-10;
+  }
+
+  .mesh-accent-2 {
+    @apply fixed -bottom-[100px] -left-[50px] w-[400px] h-[400px] bg-violet-500/10 blur-[100px] rounded-full -z-10;
+  }
+}
+
