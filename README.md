@@ -54,15 +54,6 @@ After any code change:
 npm run build && npx cap sync ios
 ```
 
-## Required secrets (not in repo)
-
-| File | What it is |
-|---|---|
-| `firebase-applet-config.json` | Firebase project API keys |
-| `ios/App/App/GoogleService-Info.plist` | iOS OAuth credentials for native Google Sign-In |
-
-Add these files locally before building. See the [Capacitor Firebase Auth docs](https://github.com/capawesome-team/capacitor-firebase/tree/main/packages/authentication) for setup steps.
-
 ## Firestore security
 
 Rules are in `firestore.rules`. Deploy with:
