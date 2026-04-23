@@ -1,20 +1,71 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Poolantir
 
-# Run and deploy your AI Studio app
+Real-time restroom facility monitoring and maintenance reporting system, built as a native iOS app using React + Capacitor.
 
-This contains everything you need to run your app locally.
+## What it does
 
-View your app in AI Studio: https://ai.studio/apps/1d62c42d-fa2b-43bb-9651-132292ad29f8
+Poolantir connects facility managers and users around a live view of restroom stall availability and maintenance status, backed by Firebase Firestore with real-time sync across all devices.
 
-## Run Locally
+### User view
+- Browse all restroom blocks and their locations
+- Tap into any restroom to see the live status of every stall and urinal (Online / Offline)
+- Submit a maintenance report (clogged, no paper, broken lock, unclean, other) directly from the app — alerts go to the admin queue instantly
 
-**Prerequisites:**  Node.js
+### Admin dashboard
+- **Overview** — usage heatmap by facility zone and an anomaly feed (offline nodes, underperforming sensors)
+- **Issues** — live queue of pending maintenance reports with one-tap resolve
+- **Sensors** — manage every restroom block and its stalls:
+  - Add / delete restroom blocks
+  - Provision new stall or urinal nodes with label and type
+  - Delete individual nodes (cascades cleanly in Firestore)
+  - Toggle node status between Online and Offline
 
+## Tech stack
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+| Layer | Technology |
+|---|---|
+| UI | React 19, Tailwind CSS v4, Framer Motion |
+| Native shell | Capacitor 7 (iOS / WKWebView) |
+| Auth | Firebase Auth — Google Sign-In via native iOS flow (`@capacitor-firebase/authentication`) |
+| Database | Firebase Firestore (real-time listeners) |
+| Build | Vite 6 |
+
+## Local development
+
+**Prerequisites:** Node.js, Xcode (for iOS)
+
+```bash
+npm install
+npm run dev        # starts Vite dev server at localhost:3000
+```
+
+## iOS build
+
+```bash
+npm run build      # compile web app → dist/
+npx cap sync ios   # copy assets into Xcode project
+npx cap open ios   # open in Xcode
+```
+
+Then select your device / simulator and hit Run in Xcode.
+
+After any code change:
+```bash
+npm run build && npx cap sync ios
+```
+
+## Required secrets (not in repo)
+
+| File | What it is |
+|---|---|
+| `firebase-applet-config.json` | Firebase project API keys |
+| `ios/App/App/GoogleService-Info.plist` | iOS OAuth credentials for native Google Sign-In |
+
+Add these files locally before building. See the [Capacitor Firebase Auth docs](https://github.com/capawesome-team/capacitor-firebase/tree/main/packages/authentication) for setup steps.
+
+## Firestore security
+
+Rules are in `firestore.rules`. Deploy with:
+```bash
+firebase deploy --only firestore:rules --project <your-project-id>
+```
