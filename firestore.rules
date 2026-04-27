@@ -50,22 +50,36 @@ service cloud.firestore {
              data.email is string && data.email.size() < 256;
     }
 
-    // 1. Restrooms
+    function isValidBuilding(data) {
+      return data.keys().hasAll(['name', 'location']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.location is string && data.location.size() < 100;
+    }
+
+    // 1. Buildings
+    match /buildings/{buildingId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidBuilding(incoming());
+      allow update: if isAdmin() && isValidBuilding(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 2. Restrooms
     match /restrooms/{restroomId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create: if isAdmin() && isValidId(restroomId) && isValidRestroom(incoming());
       allow update: if isAdmin() && isValidRestroom(incoming());
       allow delete: if isAdmin();
     }
 
-    // 2. Stalls
+    // 3. Stalls
     match /stalls/{stallId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create, update: if isAdmin() && isValidId(stallId) && isValidStall(incoming());
       allow delete: if isAdmin();
     }
 
-    // 3. Issues
+    // 4. Issues
     match /issues/{issueId} {
       allow read: if isSignedIn();
       allow create: if isVerified() && isValidId(issueId) && isValidIssue(incoming()) && 
@@ -75,7 +89,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // 4. Users
+    // 5. Users
     match /users/{userId} {
       allow read: if isOwner(userId) || (isSignedIn() && request.auth.token.email.lower() == 'braden022@gmail.com');
       allow create: if isOwner(userId) && isValidUser(incoming()) && 

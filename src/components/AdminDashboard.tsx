@@ -14,7 +14,8 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Restroom, Stall, Issue } from '../types';
+import { Building, Restroom, Stall, Issue } from '../types';
+import { SensorsPanel } from './SensorsPanel';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line
@@ -37,10 +38,21 @@ import { motion, AnimatePresence } from 'motion/react';
 import { seedInitialData } from '../lib/seed';
 
 export const AdminDashboard: React.FC = () => {
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [restrooms, setRestrooms] = useState<Restroom[]>([]);
   const [stalls, setStalls] = useState<Stall[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'issues' | 'sensors'>('overview');
+  const [seeding, setSeeding] = useState(false);
+
+  const handleForceSeed = async () => {
+    setSeeding(true);
+    try {
+      await seedInitialData();
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   // Modal state
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
@@ -58,6 +70,9 @@ export const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     seedInitialData();
+    const unsubscribeB = onSnapshot(query(collection(db, 'buildings')), (snapshot) => {
+      setBuildings(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Building)));
+    });
     const unsubscribeR = onSnapshot(query(collection(db, 'restrooms')), (snapshot) => {
       setRestrooms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Restroom)));
     });
@@ -71,6 +86,7 @@ export const AdminDashboard: React.FC = () => {
     });
 
     return () => {
+      unsubscribeB();
       unsubscribeR();
       unsubscribeS();
       unsubscribeI();
@@ -152,20 +168,31 @@ export const AdminDashboard: React.FC = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Facility Console</h2>
           <p className="text-slate-400">Live analytics and anomaly detection system.</p>
         </div>
-        <div className="flex gap-2 p-1 glass rounded-2xl w-fit">
-          {['overview', 'issues', 'sensors'].map((tab) => (
+        <div className="flex items-center gap-3">
+          {restrooms.length === 0 && (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${
-                activeTab === tab 
-                  ? 'bg-sky-500 text-[#0f172a] shadow-lg shadow-sky-500/20' 
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              onClick={handleForceSeed}
+              disabled={seeding}
+              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-[#0f172a] font-black text-[10px] uppercase tracking-widest rounded-xl transition-all active:scale-95"
             >
-              {tab}
+              {seeding ? 'Provisioning…' : 'Provision Data'}
             </button>
-          ))}
+          )}
+          <div className="flex gap-2 p-1 glass rounded-2xl w-fit">
+            {['overview', 'issues', 'sensors'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab as any)}
+                className={`px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                  activeTab === tab 
+                    ? 'bg-sky-500 text-[#0f172a] shadow-lg shadow-sky-500/20' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -302,96 +329,35 @@ export const AdminDashboard: React.FC = () => {
                     ))}
                   </tbody>
                 </table>
-             </div>
+              </div>
            </motion.div>
         )}
 
         {activeTab === 'sensors' && (
-           <motion.div 
+           <motion.div
              key="sensors"
              initial={{ opacity: 0, y: 10 }}
              animate={{ opacity: 1, y: 0 }}
-             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
            >
-             {restrooms.map(r => (
-               <div key={r.id} className="glass-card p-6 bg-white/[0.02] hover:border-white/20 transition-all group">
-                  <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <h4 className="font-bold text-lg text-white group-hover:text-sky-400 transition-colors tracking-tight">{r.name}</h4>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">{r.location}</p>
-                    </div>
-                    <div className="flex gap-1">
-                        <button 
-                            onClick={() => editRestroom(r)}
-                            className="p-2 text-white/10 hover:text-sky-400 rounded-lg transition-colors"
-                            title="Edit Block"
-                        >
-                            <Edit2 size={16} />
-                        </button>
-                        <button 
-                            onClick={() => deleteRestroom(r.id)}
-                            className="p-2 text-white/10 hover:text-red-500 rounded-lg transition-colors"
-                        >
-                            <Trash2 size={18} />
-                        </button>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    {stalls.filter(s => s.restroomId === r.id).map(s => (
-                        <div key={s.id} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
-                            <span className="text-xs font-bold text-slate-300">{s.label}</span>
-                            <div className="flex items-center gap-2">
-                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md ${
-                                    s.status === 'online' ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30' : 'bg-red-500/20 text-red-500 border border-red-500/30'
-                                }`}>
-                                    {s.status === 'online' ? 'ONLINE' : 'OFFLINE'}
-                                </span>
-                                <button
-                                    onClick={() => deleteStall(s)}
-                                    className="p-1 text-white/10 hover:text-red-500 rounded transition-colors"
-                                    title="Delete stall"
-                                >
-                                    <Trash2 size={13} />
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                    <button
-                        onClick={() => addStall(r.id)}
-                        className="w-full py-3 border border-dashed border-white/10 text-slate-500 rounded-xl hover:border-white/20 hover:text-slate-300 transition-all flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest mt-4"
-                    >
-                        <Plus size={14} /> Provision Node
-                    </button>
-                  </div>
-               </div>
-             ))}
-             <button 
-               className="p-8 border-2 border-dashed border-white/5 rounded-[2.5rem] text-slate-600 hover:text-sky-500 hover:border-sky-500/30 hover:bg-sky-500/5 transition-all flex flex-col items-center justify-center gap-6 group"
-               onClick={() => showInputs('Deploy Block', [
-                 { label: 'Name', placeholder: 'e.g. North Wing' },
-                 { label: 'Location', placeholder: 'e.g. Floor 1, North' },
-               ], ([name, location]) => {
-                 if (name && location) addDoc(collection(db, 'restrooms'), { name, location, totalStalls: 0, activeIssues: 0 });
-               })}
-             >
-                <div className="w-16 h-16 glass rounded-2xl flex items-center justify-center shadow-2xl group-hover:rotate-6 transition-transform">
-                    <Plus size={32} />
-                </div>
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">Deploy Block</span>
-             </button>
+             <SensorsPanel
+               buildings={buildings}
+               restrooms={restrooms}
+               stalls={stalls}
+             />
            </motion.div>
         )}
+
       </AnimatePresence>
 
-      {/* Confirm Modal */}
+      {/* Confirm modal */}
       <AnimatePresence>
         {confirmModal && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-6"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               className="glass-card p-8 max-w-sm w-full space-y-6"
             >
               <p className="text-white font-bold text-center">{confirmModal.message}</p>
@@ -410,30 +376,32 @@ export const AdminDashboard: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Input Modal */}
+      {/* Input modal */}
       <AnimatePresence>
         {inputModal && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-6"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="glass-card p-8 max-w-sm w-full space-y-5"
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-card p-8 max-w-sm w-full space-y-6"
             >
-              <h3 className="text-white font-bold text-lg tracking-tight">{inputModal.title}</h3>
-              {inputModal.fields.map((field, i) => (
-                <div key={i} className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{field.label}</label>
-                  <input
-                    value={inputValues[i] || ''}
-                    onChange={e => setInputValues(v => { const next = [...v]; next[i] = e.target.value; return next; })}
-                    placeholder={field.placeholder}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-sky-500/50"
-                  />
-                </div>
-              ))}
-              <div className="flex gap-3 pt-2">
+              <h3 className="text-white font-bold text-lg">{inputModal.title}</h3>
+              <div className="space-y-4">
+                {inputModal.fields.map((f, i) => (
+                  <div key={i}>
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">{f.label}</label>
+                    <input
+                      value={inputValues[i] || ''}
+                      onChange={e => setInputValues(v => { const n = [...v]; n[i] = e.target.value; return n; })}
+                      placeholder={f.placeholder}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-sky-500/50"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-3">
                 <button
                   onClick={() => setInputModal(null)}
                   className="flex-1 py-3 rounded-xl border border-white/10 text-slate-400 hover:text-white transition-colors font-bold text-sm"

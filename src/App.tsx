@@ -62,6 +62,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [guestMode, setGuestMode] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -125,7 +126,7 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (!user && !guestMode) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 relative">
         <div className="mesh-bg" />
@@ -150,6 +151,14 @@ export default function App() {
             <UserIcon size={20} />
             Sign in with Google
           </button>
+          <button
+            onClick={() => setGuestMode(true)}
+            className="w-full mt-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white font-bold py-4 px-6 rounded-xl transition-all flex items-center justify-center gap-3 active:scale-95 border border-white/10"
+          >
+            <Navigation size={20} />
+            View Facility Status
+          </button>
+          <p className="text-[10px] text-slate-600 mt-4 uppercase tracking-widest">Admin sign-in required to manage facilities</p>
         </motion.div>
       </div>
     );
@@ -178,31 +187,43 @@ export default function App() {
                   Admin
                 </span>
               )}
-              <div className="flex items-center gap-3 pr-4 border-r border-white/10 mr-2">
-                <div className="text-right hidden sm:block">
-                  <p className="text-sm font-bold text-white leading-none">{user.displayName}</p>
-                  <p className="text-xs text-slate-400 mt-1">{user.email}</p>
-                </div>
-                <img 
-                  src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} 
-                  className="w-10 h-10 rounded-xl border border-white/20 shadow-sm"
-                  alt="Avatar"
-                />
-              </div>
-              <button 
-                onClick={() => signOut(auth)}
-                className="p-2.5 text-slate-400 hover:text-white transition-colors"
-                title="Sign Out"
-              >
-                <LogOut size={20} />
-              </button>
+              {user ? (
+                <>
+                  <div className="flex items-center gap-3 pr-4 border-r border-white/10 mr-2">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-sm font-bold text-white leading-none">{user.displayName}</p>
+                      <p className="text-xs text-slate-400 mt-1">{user.email}</p>
+                    </div>
+                    <img 
+                      src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} 
+                      className="w-10 h-10 rounded-xl border border-white/20 shadow-sm"
+                      alt="Avatar"
+                    />
+                  </div>
+                  <button 
+                    onClick={() => signOut(auth)}
+                    className="p-2.5 text-slate-400 hover:text-white transition-colors"
+                    title="Sign Out"
+                  >
+                    <LogOut size={20} />
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setGuestMode(false)}
+                  className="flex items-center gap-2 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-[#0f172a] font-bold text-xs rounded-xl transition-all active:scale-95"
+                >
+                  <UserIcon size={14} />
+                  Sign In
+                </button>
+              )}
             </div>
           </div>
         </nav>
 
         <main className="max-w-7xl mx-auto p-6">
           <AnimatePresence mode="wait">
-            {profile?.isAdmin ? (
+            {user && profile?.isAdmin ? (
                <AdminDashboard key="admin" />
             ) : (
               <UserView key="user" />
