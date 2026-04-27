@@ -58,5 +58,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Poolantir uses your location to recommend the nearest available restroom.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Poolantir uses your location to recommend the nearest available restroom.</string>
 </dict>
 </plist>

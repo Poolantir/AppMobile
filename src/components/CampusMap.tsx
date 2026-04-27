@@ -81,7 +81,7 @@ function buildingIcon(name: string, sublabel: string, status: BuildingStatus): L
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100px;
         ">${name}</div>
         <div style="
-          color:${s.label}; font-size:9px; font-weight:800;
+          color:#94a3b8; font-size:9px; font-weight:800;
           font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
           letter-spacing:0.07em; text-transform:uppercase; margin-top:2px;
         ">${sublabel}</div>
@@ -168,7 +168,7 @@ export const CampusMap: React.FC<Props> = ({ markers, onSelect }) => {
   return (
     <div
       className="w-full rounded-2xl overflow-hidden border border-white/10"
-      style={{ height: '460px' }}
+      style={{ height: '560px' }}
     >
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
     </div>
