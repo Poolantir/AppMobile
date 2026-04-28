@@ -23,6 +23,14 @@ npm-debug.log*
 firebase-applet-config.json
 firebase-blueprint.json
 .firebaserc
+firebase.json
+firestore.rules
+
+# Root config / build files excluded from repo
+index.html
+metadata.json
+package.json
+package-lock.json
 
 # iOS - generated/native build artifacts
 ios/App/App/public/

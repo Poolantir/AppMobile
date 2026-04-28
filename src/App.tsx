@@ -62,7 +62,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [guestMode, setGuestMode] = useState(false);
+  const [guestMode, setGuestMode] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -171,7 +171,7 @@ export default function App() {
         <div className="mesh-accent-1" />
         <div className="mesh-accent-2" />
         
-        <nav className="sticky top-0 z-50 glass rounded-none border-t-0 border-x-0 border-b-white/5 px-6 py-4">
+        <nav className="sticky top-0 z-50 bg-[#0f172a] border-b border-white/[0.06] rounded-none px-6 py-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-sky-500 rounded-lg">

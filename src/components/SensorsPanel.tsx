@@ -16,7 +16,6 @@ import {
 import { db } from '../lib/firebase';
 import { Building, Restroom, Stall, StallType } from '../types';
 import { BuildingPickerMap } from './BuildingPickerMap';
-import { BuildingFloorPlan } from './BuildingFloorPlan';
 import {
   Plus, Trash2, Edit2, ChevronLeft, Building2,
   DoorOpen, CheckCircle2, XCircle, Save, X,
@@ -143,6 +142,34 @@ const BuildingForm: React.FC<BuildingFormProps> = ({ initial, onSave, onClose })
   );
 };
 
+// ── Floor helpers ──────────────────────────────────────────────────────────────
+const WING_OPTIONS = ['North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest', 'Center', 'Lobby'];
+
+function floorLabel(n: number): string {
+  if (n === 0) return 'Ground Floor';
+  const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
+  return `${n}${suffix} Floor`;
+}
+
+function parseInitialFloor(location?: string): number {
+  if (!location) return 0;
+  const l = location.toLowerCase();
+  if (l.includes('ground') || l.includes('lobby')) return 0;
+  const m = l.match(/(\d+)(st|nd|rd|th)\s*floor/);
+  if (m) return parseInt(m[1], 10);
+  return 0;
+}
+
+function parseInitialWing(location?: string): string {
+  if (!location) return 'Center';
+  const parts = location.split(',');
+  if (parts.length > 1) {
+    const w = parts.slice(1).join(', ').trim();
+    if (WING_OPTIONS.includes(w)) return w;
+  }
+  return 'Center';
+}
+
 // ── Sub-component: Restroom form ───────────────────────────────────────────────
 interface RestroomFormProps {
   initial?: Restroom;
@@ -152,22 +179,22 @@ interface RestroomFormProps {
 }
 
 const RestroomForm: React.FC<RestroomFormProps> = ({ initial, buildingId, onSave, onClose }) => {
-  const [name, setName]     = useState(initial?.name     ?? '');
-  const [location, setLoc]  = useState(initial?.location ?? '');
-  const [mapX, setMapX]     = useState(initial?.mapX ?? 50);
-  const [mapY, setMapY]     = useState(initial?.mapY ?? 50);
+  const [name, setName]     = useState(initial?.name ?? '');
+  const [floor, setFloor]   = useState<number>(parseInitialFloor(initial?.location));
+  const [wing, setWing]     = useState<string>(parseInitialWing(initial?.location));
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (!name.trim() || !location.trim()) return;
+    if (!name.trim()) return;
+    const location = `${floorLabel(floor)}, ${wing}`;
     setSaving(true);
     await onSave({
       buildingId,
       name: name.trim(),
-      location: location.trim(),
+      location,
       totalStalls: initial?.totalStalls ?? 0,
       activeIssues: initial?.activeIssues ?? 0,
-      mapX, mapY,
+      mapX: 50, mapY: 50,
     });
     setSaving(false);
     onClose();
@@ -193,7 +220,7 @@ const RestroomForm: React.FC<RestroomFormProps> = ({ initial, buildingId, onSave
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Name</label>
+          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Restroom Name</label>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
@@ -202,38 +229,36 @@ const RestroomForm: React.FC<RestroomFormProps> = ({ initial, buildingId, onSave
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Location</label>
-          <input
-            value={location}
-            onChange={e => setLoc(e.target.value)}
-            placeholder="e.g. Ground Floor, East Wing"
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-sky-500/50"
-          />
+          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Floor Level</label>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setFloor(Math.max(0, floor - 1))}
+              className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white transition-colors font-bold text-lg flex items-center justify-center"
+            >−</button>
+            <div className="flex-1 text-center py-2.5 bg-white/5 border border-white/10 rounded-xl">
+              <p className="text-white font-bold text-sm">{floorLabel(floor)}</p>
+            </div>
+            <button
+              onClick={() => setFloor(floor + 1)}
+              className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white transition-colors font-bold text-lg flex items-center justify-center"
+            >+</button>
+          </div>
         </div>
 
         <div className="space-y-2">
-          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-            Position on floor plan (0–100)
-          </label>
-          <div className="flex gap-3">
-            <div className="flex-1 space-y-1">
-              <span className="text-[9px] text-slate-600 uppercase tracking-wider">X (left ↔ right)</span>
-              <input
-                type="range" min="5" max="95" value={mapX}
-                onChange={e => setMapX(Number(e.target.value))}
-                className="w-full accent-sky-500"
-              />
-              <span className="text-[9px] text-slate-500">{mapX}</span>
-            </div>
-            <div className="flex-1 space-y-1">
-              <span className="text-[9px] text-slate-600 uppercase tracking-wider">Y (top ↕ bottom)</span>
-              <input
-                type="range" min="5" max="95" value={mapY}
-                onChange={e => setMapY(Number(e.target.value))}
-                className="w-full accent-sky-500"
-              />
-              <span className="text-[9px] text-slate-500">{mapY}</span>
-            </div>
+          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Location Within Floor</label>
+          <div className="grid grid-cols-3 gap-2">
+            {WING_OPTIONS.map(w => (
+              <button
+                key={w}
+                onClick={() => setWing(w)}
+                className={`py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                  wing === w
+                    ? 'bg-sky-500 text-[#0f172a]'
+                    : 'bg-white/5 text-slate-400 border border-white/10 hover:border-white/20'
+                }`}
+              >{w}</button>
+            ))}
           </div>
         </div>
 
@@ -243,7 +268,7 @@ const RestroomForm: React.FC<RestroomFormProps> = ({ initial, buildingId, onSave
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || !name.trim() || !location.trim()}
+            disabled={saving || !name.trim()}
             className="flex-1 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-[#0f172a] font-black text-sm transition-all active:scale-95 flex items-center justify-center gap-2"
           >
             <Save size={15} />
@@ -624,67 +649,70 @@ export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls }) 
             </button>
           </div>
 
-          {/* Floor plan preview (read-only, clickable) */}
-          {buildingRestrooms.length > 0 && (
-            <BuildingFloorPlan
-              restrooms={buildingRestrooms}
-              stalls={stalls}
-              issues={[]}
-              recommendedId={null}
-              onSelect={r => setSelectedRestroom(r)}
-            />
-          )}
-
-          {/* Restroom list */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-            {buildingRestrooms.map(r => {
-              const rStalls = stalls.filter(s => s.restroomId === r.id);
-              const online = rStalls.filter(s => s.status === 'online').length;
-              return (
-                <motion.div
-                  key={r.id}
-                  layout
-                  className="glass-card p-5 flex items-center gap-4 hover:border-white/20 transition-all group cursor-pointer"
-                  onClick={() => setSelectedRestroom(r)}
+          {/* Floor-grouped restroom list */}
+          {(() => {
+            const groups: { floor: string; floorNum: number; rooms: Restroom[] }[] = [];
+            buildingRestrooms.forEach(r => {
+              const fn = parseInitialFloor(r.location);
+              const fl = floorLabel(fn);
+              const g = groups.find(g => g.floor === fl);
+              if (g) { g.rooms.push(r); } else { groups.push({ floor: fl, floorNum: fn, rooms: [r] }); }
+            });
+            groups.sort((a, b) => a.floorNum - b.floorNum);
+            return (
+              <div className="space-y-4">
+                {groups.map(({ floor: fl, rooms }) => (
+                  <div key={fl} className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{fl}</span>
+                      <div className="flex-1 h-px bg-white/5" />
+                    </div>
+                    {rooms.map(r => {
+                      const rStalls = stalls.filter(s => s.restroomId === r.id);
+                      const online = rStalls.filter(s => s.status === 'online').length;
+                      const wing = r.location.split(',').slice(1).join(', ').trim() || null;
+                      return (
+                        <motion.div
+                          key={r.id}
+                          layout
+                          className="glass-card p-5 flex items-center gap-4 hover:border-white/20 transition-all group cursor-pointer"
+                          onClick={() => setSelectedRestroom(r)}
+                        >
+                          <div className="p-3 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20 shrink-0">
+                            <DoorOpen size={20} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-white group-hover:text-sky-400 transition-colors truncate">{r.name}</p>
+                            {wing && <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mt-0.5">{wing}</p>}
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-0.5">{online}/{rStalls.length} online</p>
+                          </div>
+                          <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => setRestroomForm({ open: true, editing: r })}
+                              className="p-2 text-slate-600 hover:text-sky-400 rounded-lg transition-colors"
+                              title="Edit"
+                            ><Edit2 size={15} /></button>
+                            <button
+                              onClick={() => deleteRestroom(r)}
+                              className="p-2 text-slate-600 hover:text-red-500 rounded-lg transition-colors"
+                              title="Delete"
+                            ><Trash2 size={15} /></button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                ))}
+                <button
+                  onClick={() => setRestroomForm({ open: true })}
+                  className="w-full p-6 border-2 border-dashed border-white/10 rounded-2xl text-slate-600 hover:text-sky-400 hover:border-sky-500/30 hover:bg-sky-500/5 transition-all flex flex-col items-center justify-center gap-3"
                 >
-                  <div className="p-3 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20 shrink-0">
-                    <DoorOpen size={20} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-white group-hover:text-sky-400 transition-colors truncate">{r.name}</p>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-0.5">
-                      {r.location} · {online}/{rStalls.length} online
-                    </p>
-                  </div>
-                  <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                    <button
-                      onClick={() => setRestroomForm({ open: true, editing: r })}
-                      className="p-2 text-slate-600 hover:text-sky-400 rounded-lg transition-colors"
-                      title="Edit"
-                    >
-                      <Edit2 size={15} />
-                    </button>
-                    <button
-                      onClick={() => deleteRestroom(r)}
-                      className="p-2 text-slate-600 hover:text-red-500 rounded-lg transition-colors"
-                      title="Delete"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </motion.div>
-              );
-            })}
-
-            {/* Add restroom */}
-            <button
-              onClick={() => setRestroomForm({ open: true })}
-              className="p-6 border-2 border-dashed border-white/10 rounded-2xl text-slate-600 hover:text-sky-400 hover:border-sky-500/30 hover:bg-sky-500/5 transition-all flex flex-col items-center justify-center gap-3"
-            >
-              <Plus size={22} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Add Restroom</span>
-            </button>
-          </div>
+                  <Plus size={22} />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Add Restroom</span>
+                </button>
+              </div>
+            );
+          })()}
         </motion.div>
 
         <AnimatePresence>
