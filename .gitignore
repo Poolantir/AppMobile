@@ -31,6 +31,7 @@ index.html
 metadata.json
 package.json
 package-lock.json
+restroom_usage_1m.csv
 
 # iOS - generated/native build artifacts
 ios/App/App/public/

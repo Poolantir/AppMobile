@@ -14,11 +14,11 @@ import {
   doc, query, where, increment,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Building, Restroom, Stall, StallType } from '../types';
+import { Building, Restroom, Stall, StallType, Issue } from '../types';
 import { BuildingPickerMap } from './BuildingPickerMap';
 import {
   Plus, Trash2, Edit2, ChevronLeft, Building2,
-  DoorOpen, CheckCircle2, XCircle, Save, X,
+  DoorOpen, CheckCircle2, XCircle, Save, X, History, Cpu, User,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -26,6 +26,7 @@ interface Props {
   buildings: Building[];
   restrooms: Restroom[];
   stalls: Stall[];
+  issues: Issue[];
 }
 
 // ── Small helpers ──────────────────────────────────────────────────────────────
@@ -396,10 +397,11 @@ const StallForm: React.FC<StallFormProps> = ({ initial, restroomId, onSave, onCl
 };
 
 // ── Main SensorsPanel ──────────────────────────────────────────────────────────
-export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls }) => {
+export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls, issues }) => {
   // Drill-down state
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [selectedRestroom, setSelectedRestroom] = useState<Restroom | null>(null);
+  const [selectedStall, setSelectedStall] = useState<Stall | null>(null);
 
   // Form visibility
   const [buildingForm, setBuildingForm] = useState<{ open: boolean; editing?: Building }>({ open: false });
@@ -537,9 +539,10 @@ export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls }) 
               <motion.div
                 key={s.id}
                 layout
-                className={`glass-card p-5 flex items-center justify-between gap-4 border transition-all ${
-                  s.status === 'online' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'
+                className={`glass-card p-5 flex items-center justify-between gap-4 border transition-all cursor-pointer ${
+                  s.status === 'online' ? 'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40' : 'border-red-500/20 bg-red-500/5 hover:border-red-500/40'
                 }`}
+                onClick={() => setSelectedStall(s)}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{s.type === 'urinal' ? '🚿' : '🚽'}</span>
@@ -613,6 +616,75 @@ export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls }) 
         </AnimatePresence>
 
         <ConfirmModal state={confirmDelete} onClose={() => setConfirmDelete(null)} />
+
+        {/* Stall issue history modal */}
+        <AnimatePresence>
+          {selectedStall && (() => {
+            const stallIssues = issues
+              .filter(i => i.stallId === selectedStall.id)
+              .sort((a, b) => {
+                if (a.status === b.status) return (b.reportedAt?.toMillis?.() ?? 0) - (a.reportedAt?.toMillis?.() ?? 0);
+                return a.status === 'pending' ? -1 : 1;
+              });
+            const typeLabel = (t: string) => t === 'extended_occupancy' ? 'Extended Occupancy' : t === 'sensor_glitch' ? 'Sensor Issue' : t.replace(/_/g, ' ');
+            return (
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-6 sm:pb-0"
+                onClick={() => setSelectedStall(null)}
+              >
+                <motion.div
+                  initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
+                  transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                  className="glass-card p-7 w-full max-w-md space-y-5 max-h-[80vh] flex flex-col"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-3 shrink-0">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                        <History size={10} /> Issue History
+                      </p>
+                      <h3 className="text-lg font-black text-white">{selectedStall.label}</h3>
+                      <p className="text-xs text-slate-500 font-bold mt-0.5">{selectedStall.type} · {selectedStall.occupancyCount} uses</p>
+                    </div>
+                    <button onClick={() => setSelectedStall(null)} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white transition-all shrink-0">
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto flex-1 space-y-2 pr-1">
+                    {stallIssues.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-center text-slate-600">
+                        <CheckCircle2 size={28} className="mb-3 text-emerald-500/30" />
+                        <p className="text-[10px] font-black uppercase tracking-widest">No issue history</p>
+                      </div>
+                    ) : stallIssues.map(i => (
+                      <div key={i.id} className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${
+                        i.status === 'pending' ? 'bg-amber-500/10 border-amber-500/20' : 'bg-white/[0.02] border-white/5'
+                      }`}>
+                        <div className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center border mt-0.5 ${
+                          i.source === 'system' ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                        }`}>
+                          {i.source === 'system' ? <Cpu size={11} /> : <User size={11} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[9px] font-black uppercase tracking-widest ${i.status === 'pending' ? 'text-amber-400' : 'text-slate-500'}`}>{typeLabel(i.type)}</span>
+                            <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${
+                              i.status === 'pending' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                            }`}>{i.status}</span>
+                          </div>
+                          <p className="text-[9px] text-slate-600 font-medium mt-0.5">
+                            {i.reportedAt?.toDate().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              </motion.div>
+            );
+          })()}
+        </AnimatePresence>
       </>
     );
   }

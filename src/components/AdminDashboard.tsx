@@ -13,7 +13,7 @@ import {
   getDocs,
   serverTimestamp 
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { Building, Restroom, Stall, Issue } from '../types';
 import { SensorsPanel } from './SensorsPanel';
 import { 
@@ -45,6 +45,15 @@ export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'issues' | 'sensors'>('overview');
   const [seeding, setSeeding] = useState(false);
   const [selectedNode, setSelectedNode] = useState<{ stall: Stall; restroom: Restroom; building: Building } | null>(null);
+  const [showIssueForm, setShowIssueForm] = useState(false);
+  const [issueForm, setIssueForm] = useState<{
+    buildingId: string; restroomId: string; stallId: string;
+    type: IssueType; markOffline: boolean; submitting: boolean;
+  }>({ buildingId: '', restroomId: '', stallId: '', type: 'other', markOffline: false, submitting: false });
+  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [quickLog, setQuickLog] = useState<{ type: IssueType; markOffline: boolean; submitting: boolean }>({
+    type: 'other', markOffline: false, submitting: false,
+  });
 
   const handleForceSeed = async () => {
     setSeeding(true);
@@ -52,6 +61,57 @@ export const AdminDashboard: React.FC = () => {
       await seedInitialData();
     } finally {
       setSeeding(false);
+    }
+  };
+
+  const hasPendingIssue = (stallId: string | undefined, restroomId: string, type: IssueType) =>
+    issues.some(i =>
+      i.status === 'pending' && i.type === type &&
+      (stallId ? i.stallId === stallId : !i.stallId && i.restroomId === restroomId)
+    );
+
+  const handleLogIssue = async () => {
+    if (!issueForm.restroomId || !issueForm.type) return;
+    const effectiveType: IssueType = issueForm.markOffline && issueForm.stallId ? 'sensor_glitch' : issueForm.type;
+    if (hasPendingIssue(issueForm.stallId || undefined, issueForm.restroomId, effectiveType)) {
+      setIssueForm(f => ({ ...f, submitting: false }));
+      return;
+    }
+    setIssueForm(f => ({ ...f, submitting: true }));
+    try {
+      const stallDoc = issueForm.stallId ? stalls.find(s => s.id === issueForm.stallId) : null;
+      if (issueForm.markOffline && issueForm.stallId && stallDoc) {
+        // Create a single system-anomaly issue and mark sensor offline — no separate user issue
+        autoIssuedRef.current.add(issueForm.stallId);
+        await addDoc(collection(db, 'issues'), {
+          restroomId: issueForm.restroomId,
+          stallId: issueForm.stallId,
+          type: 'sensor_glitch' as IssueType,
+          status: 'pending',
+          reportedAt: serverTimestamp(),
+          reportedBy: 'system',
+          source: 'system',
+          nodeLabel: stallDoc.label,
+          scenario: 'node_offline',
+          sensorConf: 0.95,
+        });
+        await updateDoc(doc(db, 'stalls', issueForm.stallId), { status: 'offline' });
+      } else {
+        await addDoc(collection(db, 'issues'), {
+          restroomId: issueForm.restroomId,
+          ...(issueForm.stallId && { stallId: issueForm.stallId }),
+          type: issueForm.type,
+          status: 'pending',
+          reportedAt: serverTimestamp(),
+          reportedBy: auth.currentUser?.uid ?? 'admin',
+          source: 'user',
+          ...(stallDoc && { nodeLabel: stallDoc.label }),
+        });
+      }
+      setIssueForm({ buildingId: '', restroomId: '', stallId: '', type: 'other', markOffline: false, submitting: false });
+      setShowIssueForm(false);
+    } finally {
+      setIssueForm(f => ({ ...f, submitting: false }));
     }
   };
 
@@ -251,7 +311,12 @@ export const AdminDashboard: React.FC = () => {
             if (r && b) setSelectedNode({ stall: s, restroom: r, building: b });
           };
           const nodeIssues = selectedNode
-            ? issues.filter(i => i.stallId === selectedNode.stall.id || i.restroomId === selectedNode.stall.restroomId)
+            ? issues.filter(i =>
+                i.status === 'pending' && (
+                  i.stallId === selectedNode.stall.id ||
+                  (!i.stallId && i.restroomId === selectedNode.stall.restroomId)
+                )
+              )
             : [];
           const restroomStalls = selectedNode
             ? stalls.filter(s => s.restroomId === selectedNode.stall.restroomId)
@@ -341,7 +406,7 @@ export const AdminDashboard: React.FC = () => {
                       {/* Issues on this node */}
                       <div className="flex-1 min-h-0">
                         <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">
-                          Issues ({nodeIssues.filter(i => i.status === 'pending').length} pending)
+                          Active Issues ({nodeIssues.length})
                         </p>
                         <div className="space-y-2 overflow-y-auto max-h-[140px]">
                           {nodeIssues.length === 0 ? (
@@ -373,6 +438,75 @@ export const AdminDashboard: React.FC = () => {
                           Mark as Resolved / Reset Sensor
                         </button>
                       )}
+
+                      {/* Quick log issue */}
+                      <div className="border-t border-white/5 pt-4 space-y-3">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Log Issue</p>
+                        <select
+                          value={quickLog.type}
+                          onChange={e => setQuickLog(q => ({ ...q, type: e.target.value as IssueType }))}
+                          className="w-full bg-white/5 border border-white/10 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-sky-500/50"
+                        >
+                          <option value="clogged">Clogged</option>
+                          <option value="no_paper">No Paper</option>
+                          <option value="broken_lock">Broken Lock</option>
+                          <option value="unclean">Unclean</option>
+                          <option value="sensor_glitch">Sensor Issue</option>
+                          <option value="other">Other</option>
+                        </select>
+                        <label className="flex items-center gap-3 cursor-pointer select-none">
+                          <div
+                            onClick={() => setQuickLog(q => ({ ...q, markOffline: !q.markOffline }))}
+                            className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${
+                              quickLog.markOffline ? 'bg-red-500' : 'bg-white/10'
+                            }`}
+                          >
+                            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${
+                              quickLog.markOffline ? 'left-4' : 'left-0.5'
+                            }`} />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mark sensor offline</span>
+                        </label>
+                        <button
+                          disabled={quickLog.submitting || hasPendingIssue(selectedNode.stall.id, selectedNode.restroom.id, quickLog.markOffline ? 'sensor_glitch' : quickLog.type)}
+                          onClick={async () => {
+                            const s = selectedNode.stall;
+                            const r = selectedNode.restroom;
+                            const effectiveType: IssueType = quickLog.markOffline ? 'sensor_glitch' : quickLog.type;
+                            if (hasPendingIssue(s.id, r.id, effectiveType)) return;
+                            setQuickLog(q => ({ ...q, submitting: true }));
+                            try {
+                              if (quickLog.markOffline) {
+                                autoIssuedRef.current.add(s.id);
+                                await addDoc(collection(db, 'issues'), {
+                                  restroomId: r.id, stallId: s.id, type: 'sensor_glitch' as IssueType,
+                                  status: 'pending', reportedAt: serverTimestamp(),
+                                  reportedBy: 'system', source: 'system',
+                                  nodeLabel: s.label, scenario: 'node_offline', sensorConf: 0.95,
+                                });
+                                await updateDoc(doc(db, 'stalls', s.id), { status: 'offline' });
+                              } else {
+                                await addDoc(collection(db, 'issues'), {
+                                  restroomId: r.id, stallId: s.id, type: quickLog.type,
+                                  status: 'pending', reportedAt: serverTimestamp(),
+                                  reportedBy: auth.currentUser?.uid ?? 'admin', source: 'user',
+                                  nodeLabel: s.label,
+                                });
+                              }
+                              setQuickLog({ type: 'other', markOffline: false, submitting: false });
+                            } finally {
+                              setQuickLog(q => ({ ...q, submitting: false }));
+                            }
+                          }}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed text-[#0f172a] font-black text-[10px] uppercase tracking-widest rounded-xl transition-all active:scale-95"
+                        >
+                          <Plus size={13} />
+                          {quickLog.submitting ? 'Logging…'
+                            : hasPendingIssue(selectedNode.stall.id, selectedNode.restroom.id, quickLog.markOffline ? 'sensor_glitch' : quickLog.type)
+                            ? 'Already Reported'
+                            : 'Log Issue'}
+                        </button>
+                      </div>
                     </motion.div>
                   ) : (
                     <motion.div key="anomalies" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="flex flex-col h-full">
@@ -425,113 +559,174 @@ export const AdminDashboard: React.FC = () => {
              animate={{ opacity: 1, y: 0 }}
              className="space-y-4"
            >
-             <div className="glass-card overflow-hidden bg-white/[0.02]">
-               <div className="overflow-x-auto">
-                 <table className="w-full text-left border-collapse min-w-[900px]">
-                   <thead>
-                     <tr className="bg-white/[0.03] border-b border-white/5">
-                       <th className="p-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Source</th>
-                       <th className="p-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Defect Type</th>
-                       <th className="p-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Facility / Node</th>
-                       <th className="p-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Sensor Conf</th>
-                       <th className="p-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Timestamp</th>
-                       <th className="p-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Actions</th>
-                     </tr>
-                   </thead>
-                   <tbody>
-                     {issues.length === 0 ? (
-                       <tr>
-                         <td colSpan={6} className="p-20 text-center text-slate-500 font-bold uppercase tracking-widest opacity-20">Clear Queue (No reports)</td>
-                       </tr>
-                     ) : issues.map(i => {
-                       const isSystem = i.source === 'system';
-                       const restroom = restrooms.find(r => r.id === i.restroomId);
-                       const typeLabel = i.type === 'extended_occupancy' ? 'Extended Occupancy'
-                         : i.type === 'sensor_glitch' ? 'Sensor Glitch'
-                         : i.type.replace(/_/g, ' ');
-                       return (
-                         <tr key={i.id} className={`border-b border-white/5 transition-colors ${i.status === 'resolved' ? 'opacity-20 grayscale pointer-events-none' : 'hover:bg-white/[0.02]'}`}>
-                           <td className="p-5">
-                             {isSystem ? (
-                               <div className="flex items-center gap-2">
-                                 <div className="w-7 h-7 bg-sky-500/10 text-sky-400 rounded-lg flex items-center justify-center border border-sky-500/20">
-                                   <Cpu size={12} />
-                                 </div>
-                                 <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest">System</span>
-                               </div>
-                             ) : (
-                               <div className="flex items-center gap-2">
-                                 <div className="w-7 h-7 bg-slate-500/10 text-slate-400 rounded-lg flex items-center justify-center border border-slate-500/20">
-                                   <User size={12} />
-                                 </div>
-                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                   {i.reportedBy === 'ml-system' ? 'ML' : `ID-${i.reportedBy.slice(0, 6)}`}
-                                 </span>
-                               </div>
-                             )}
-                           </td>
-                           <td className="p-5">
-                             <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
-                               i.status === 'pending'
-                                 ? isSystem
-                                   ? 'bg-red-500/20 text-red-400 border-red-500/30'
-                                   : 'bg-amber-500/20 text-amber-500 border-amber-500/30'
-                                 : 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30'
-                             }`}>
-                               {typeLabel}
-                             </span>
-                           </td>
-                           <td className="p-5">
-                             <p className="text-sm font-bold text-slate-300">{restroom?.name ?? 'Unknown'}</p>
-                             {i.nodeLabel && (
-                               <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mt-0.5">{i.nodeLabel}</p>
-                             )}
-                           </td>
-                           <td className="p-5">
-                             {i.sensorConf != null ? (
-                               <div className="flex items-center gap-2">
-                                 <div className="flex-1 max-w-[60px] h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                   <div
-                                     className={`h-full rounded-full ${i.sensorConf > 0.8 ? 'bg-emerald-400' : i.sensorConf > 0.5 ? 'bg-amber-400' : 'bg-red-400'}`}
-                                     style={{ width: `${i.sensorConf * 100}%` }}
-                                   />
-                                 </div>
-                                 <span className="text-[9px] text-slate-500 font-bold">{Math.round(i.sensorConf * 100)}%</span>
-                               </div>
-                             ) : (
-                               <span className="text-[9px] text-slate-700">—</span>
-                             )}
-                           </td>
-                           <td className="p-5 text-xs text-slate-500 font-medium">
-                             {i.reportedAt?.toDate().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                           </td>
-                           <td className="p-5">
-                             <div className="flex items-center gap-2">
-                               {i.status === 'pending' && (
-                                 <>
-                                   <button
-                                     onClick={() => resolveIssue(i.id)}
-                                     className="p-2 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-90"
-                                     title="Mark resolved"
-                                   >
-                                     <CheckCircle size={16} />
-                                   </button>
-                                   <button
-                                     onClick={() => setActiveTab('sensors')}
-                                     className="p-2 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 rounded-lg transition-all active:scale-90"
-                                     title="Investigate in Sensors"
-                                   >
-                                     <ArrowRight size={16} />
-                                   </button>
-                                 </>
-                               )}
-                             </div>
-                           </td>
-                         </tr>
+             {/* Toolbar */}
+             <div className="flex items-center justify-between">
+               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{issues.filter(i => i.status === 'pending').length} pending issues</p>
+               <button
+                 onClick={() => setShowIssueForm(v => !v)}
+                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-[#0f172a] font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+               >
+                 <Plus size={13} />
+                 Log Issue
+               </button>
+             </div>
+
+             {/* Manual issue form */}
+             <AnimatePresence>
+               {showIssueForm && (
+                 <motion.div
+                   initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                   className="glass-card p-6 bg-white/[0.02] space-y-4"
+                 >
+                   <h4 className="text-sm font-black text-white uppercase tracking-widest">Log Manual Issue</h4>
+                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                     {/* Building */}
+                     <div className="space-y-1.5">
+                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Building</label>
+                       <select
+                         value={issueForm.buildingId}
+                         onChange={e => setIssueForm(f => ({ ...f, buildingId: e.target.value, restroomId: '', stallId: '' }))}
+                         className="w-full bg-white/5 border border-white/10 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-sky-500/50"
+                       >
+                         <option value="">Select building…</option>
+                         {buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                       </select>
+                     </div>
+                     {/* Restroom */}
+                     <div className="space-y-1.5">
+                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Restroom</label>
+                       <select
+                         value={issueForm.restroomId}
+                         onChange={e => setIssueForm(f => ({ ...f, restroomId: e.target.value, stallId: '' }))}
+                         disabled={!issueForm.buildingId}
+                         className="w-full bg-white/5 border border-white/10 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-sky-500/50 disabled:opacity-30"
+                       >
+                         <option value="">Select restroom…</option>
+                         {restrooms.filter(r => r.buildingId === issueForm.buildingId).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                       </select>
+                     </div>
+                     {/* Stall (optional) */}
+                     <div className="space-y-1.5">
+                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Stall / Node <span className="opacity-40">(optional)</span></label>
+                       <select
+                         value={issueForm.stallId}
+                         onChange={e => setIssueForm(f => ({ ...f, stallId: e.target.value }))}
+                         disabled={!issueForm.restroomId}
+                         className="w-full bg-white/5 border border-white/10 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-sky-500/50 disabled:opacity-30"
+                       >
+                         <option value="">All / unspecified</option>
+                         {stalls.filter(s => s.restroomId === issueForm.restroomId).map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                       </select>
+                     </div>
+                     {/* Issue type */}
+                     <div className="space-y-1.5">
+                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Issue Type</label>
+                       <select
+                         value={issueForm.type}
+                         onChange={e => setIssueForm(f => ({ ...f, type: e.target.value as IssueType }))}
+                         className="w-full bg-white/5 border border-white/10 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-sky-500/50"
+                       >
+                         <option value="clogged">Clogged</option>
+                         <option value="no_paper">No Paper</option>
+                         <option value="broken_lock">Broken Lock</option>
+                         <option value="unclean">Unclean</option>
+                         <option value="sensor_glitch">Sensor Issue</option>
+                         <option value="other">Other</option>
+                       </select>
+                     </div>
+                   </div>
+                   {/* Mark offline toggle */}
+                   {issueForm.stallId && (
+                     <label className="flex items-center gap-3 cursor-pointer select-none w-fit">
+                       <div
+                         onClick={() => setIssueForm(f => ({ ...f, markOffline: !f.markOffline }))}
+                         className={`w-10 h-5 rounded-full transition-colors relative ${
+                           issueForm.markOffline ? 'bg-red-500' : 'bg-white/10'
+                         }`}
+                       >
+                         <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${
+                           issueForm.markOffline ? 'left-5' : 'left-0.5'
+                         }`} />
+                       </div>
+                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mark sensor offline</span>
+                     </label>
+                   )}
+                   <div className="flex items-center gap-3 pt-1">
+                     {(() => {
+                       const isDupe = !!issueForm.restroomId && hasPendingIssue(
+                         issueForm.stallId || undefined,
+                         issueForm.restroomId,
+                         issueForm.markOffline && issueForm.stallId ? 'sensor_glitch' : issueForm.type
                        );
-                     })}
-                   </tbody>
-                 </table>
+                       return (
+                         <button
+                           onClick={handleLogIssue}
+                           disabled={!issueForm.restroomId || issueForm.submitting || isDupe}
+                           className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed text-[#0f172a] font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                         >
+                           {issueForm.submitting ? 'Logging…' : isDupe ? 'Already Reported' : 'Submit Issue'}
+                         </button>
+                       );
+                     })()}
+                     <button
+                       onClick={() => setShowIssueForm(false)}
+                       className="px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                     >
+                       Cancel
+                     </button>
+                   </div>
+                 </motion.div>
+               )}
+             </AnimatePresence>
+
+             <div className="glass-card overflow-hidden bg-white/[0.02]">
+               <div className="divide-y divide-white/5">
+                 {issues.length === 0 ? (
+                   <div className="p-20 text-center text-slate-500 font-bold uppercase tracking-widest opacity-20">Clear Queue — No Reports</div>
+                 ) : [...issues].sort((a, b) => {
+                     if (a.status === b.status) return 0;
+                     return a.status === 'pending' ? -1 : 1;
+                   }).map(i => {
+                   const isSystem = i.source === 'system';
+                   const restroom = restrooms.find(r => r.id === i.restroomId);
+                   const building = restroom ? buildings.find(b => b.id === restroom.buildingId) : null;
+                   const typeLabel = i.type === 'extended_occupancy' ? 'Extended Occupancy'
+                     : i.type === 'sensor_glitch' ? 'Sensor Issue'
+                     : i.type.replace(/_/g, ' ');
+                   return (
+                     <button
+                       key={i.id}
+                       onClick={() => setSelectedIssue(i)}
+                       className={`w-full text-left flex items-center gap-4 px-5 py-4 transition-colors hover:bg-white/[0.03] active:bg-white/[0.05] ${
+                         i.status === 'resolved' ? 'opacity-30 grayscale pointer-events-none' : ''
+                       }`}
+                     >
+                       {/* Source icon */}
+                       <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center border ${
+                         isSystem ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                       }`}>
+                         {isSystem ? <Cpu size={13} /> : <User size={13} />}
+                       </div>
+                       {/* Type badge + location */}
+                       <div className="flex-1 min-w-0">
+                         <div className="flex items-center gap-2 flex-wrap">
+                           <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                             isSystem ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-amber-500/20 text-amber-500 border-amber-500/30'
+                           }`}>{typeLabel}</span>
+                           {i.nodeLabel && <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">{i.nodeLabel}</span>}
+                         </div>
+                         <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">
+                           {building?.name ?? ''}{restroom ? ` · ${restroom.name}` : ''}
+                         </p>
+                       </div>
+                       {/* Timestamp */}
+                       <span className="shrink-0 text-[10px] text-slate-600 font-medium">
+                         {i.reportedAt?.toDate().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                       </span>
+                       <ChevronRight size={14} className="shrink-0 text-slate-600" />
+                     </button>
+                   );
+                 })}
                </div>
              </div>
            </motion.div>
@@ -547,6 +742,7 @@ export const AdminDashboard: React.FC = () => {
                buildings={buildings}
                restrooms={restrooms}
                stalls={stalls}
+               issues={issues}
              />
            </motion.div>
         )}
@@ -618,6 +814,108 @@ export const AdminDashboard: React.FC = () => {
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* Issue detail modal */}
+      <AnimatePresence>
+        {selectedIssue && (() => {
+          const i = selectedIssue;
+          const isSystem = i.source === 'system';
+          const restroom = restrooms.find(r => r.id === i.restroomId);
+          const building = restroom ? buildings.find(b => b.id === restroom.buildingId) : null;
+          const stall = i.stallId ? stalls.find(s => s.id === i.stallId) : null;
+          const typeLabel = i.type === 'extended_occupancy' ? 'Extended Occupancy'
+            : i.type === 'sensor_glitch' ? 'Sensor Issue'
+            : i.type.replace(/_/g, ' ');
+          return (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4 pb-6 sm:pb-0"
+              onClick={() => setSelectedIssue(null)}
+            >
+              <motion.div
+                initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
+                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                className="glass-card p-7 w-full max-w-md space-y-5"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1.5">
+                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                      isSystem ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-amber-500/20 text-amber-500 border-amber-500/30'
+                    }`}>{typeLabel}</span>
+                    <p className="text-lg font-black text-white">{restroom?.name ?? 'Unknown Restroom'}</p>
+                    {building && <p className="text-xs text-slate-500 font-bold">{building.name}</p>}
+                  </div>
+                  <button onClick={() => setSelectedIssue(null)} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-500 hover:text-white transition-all">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* Details grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/[0.03] rounded-xl p-3 space-y-0.5">
+                    <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Source</p>
+                    <p className="text-xs font-black text-slate-300 flex items-center gap-1.5">
+                      {isSystem ? <><Cpu size={11} className="text-sky-400" /> System</> : <><User size={11} /> {i.reportedBy === 'admin' ? 'Admin' : `ID-${i.reportedBy.slice(0, 6)}`}</>}
+                    </p>
+                  </div>
+                  <div className="bg-white/[0.03] rounded-xl p-3 space-y-0.5">
+                    <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Status</p>
+                    <p className={`text-xs font-black ${i.status === 'pending' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                      {i.status === 'pending' ? 'Pending' : 'Resolved'}
+                    </p>
+                  </div>
+                  {stall && (() => {
+                    const stallPeers = stalls.filter(s => s.restroomId === stall.restroomId);
+                    const avg = stallPeers.length > 0 ? Math.round(stallPeers.reduce((sum, s) => sum + s.occupancyCount, 0) / stallPeers.length) : 0;
+                    return (
+                      <>
+                        <div className="bg-white/[0.03] rounded-xl p-3 space-y-0.5">
+                          <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Node / Stall</p>
+                          <p className="text-xs font-black text-slate-300">{stall.label}</p>
+                        </div>
+                        <div className="bg-white/[0.03] rounded-xl p-3 space-y-0.5">
+                          <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Room Usage Avg</p>
+                          <p className="text-xs font-black text-slate-300">{avg} uses</p>
+                        </div>
+                      </>
+                    );
+                  })()}
+                  <div className="bg-white/[0.03] rounded-xl p-3 space-y-0.5 col-span-2">
+                    <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Reported</p>
+                    <p className="text-xs font-bold text-slate-400">
+                      {i.reportedAt?.toDate().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                {i.status === 'pending' && (
+                  <div className="flex flex-col gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        if (stall) handleResetStall(stall.id);
+                        else resolveIssue(i.id);
+                        setSelectedIssue(null);
+                      }}
+                      className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle size={14} /> {stall ? 'Resolve & Reset Sensor' : 'Mark Resolved'}
+                    </button>
+                    <button
+                      onClick={() => { setSelectedIssue(null); setActiveTab('sensors'); }}
+                      className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      <ArrowRight size={14} /> Investigate in Sensors
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
     </motion.div>
   );
