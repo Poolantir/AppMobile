@@ -14,7 +14,7 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { Building, Restroom, Stall, Issue } from '../types';
+import { Building, Restroom, Stall, Issue, SensorEvent, IssueType } from '../types';
 import { SensorsPanel } from './SensorsPanel';
 import { 
   Activity, 
@@ -161,11 +161,72 @@ export const AdminDashboard: React.FC = () => {
       setIssues(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Issue)));
     });
 
+    // ── Sensor events listener ──────────────────────────────────────────────
+    // Processes events written by partner hardware (no auth needed to write).
+    // Maps nodeId → stall and updates status/count in real-time.
+    const processedEventsSet = new Set<string>();
+    const unsubscribeE = onSnapshot(
+      query(collection(db, 'sensor_events'), where('processed', '!=', true), orderBy('processed'), orderBy('timestamp', 'asc')),
+      async (snapshot) => {
+        for (const change of snapshot.docChanges()) {
+          if (change.type !== 'added') continue;
+          const ev = { id: change.doc.id, ...change.doc.data() } as SensorEvent;
+          if (processedEventsSet.has(ev.id)) continue;
+          processedEventsSet.add(ev.id);
+          // Find matching stall by nodeId
+          const stallsSnap = await getDocs(query(collection(db, 'stalls'), where('nodeId', '==', ev.nodeId)));
+          if (stallsSnap.empty) continue;
+          const stallDoc = stallsSnap.docs[0];
+          const stall = { id: stallDoc.id, ...stallDoc.data() } as Stall;
+          const updates: Record<string, any> = {};
+          if (ev.event === 'in_use') {
+            updates.status = 'online';
+            updates.occupancyCount = increment(1);
+            updates.lastOccupiedAt = ev.timestamp;
+          } else if (ev.event === 'vacant') {
+            updates.status = 'online';
+          } else if (ev.event === 'offline') {
+            updates.status = 'offline';
+          } else if (ev.event === 'online') {
+            updates.status = 'online';
+          }
+          await Promise.all([
+            updateDoc(doc(db, 'stalls', stallDoc.id), updates),
+            updateDoc(change.doc.ref, { processed: true }),
+          ]);
+          // Auto-raise a system issue when a sensor goes offline via hardware event
+          if (ev.event === 'offline' && !autoIssuedRef.current.has(stallDoc.id)) {
+            const alreadyOpen = await getDocs(query(
+              collection(db, 'issues'),
+              where('stallId', '==', stallDoc.id),
+              where('status', '==', 'pending'),
+              where('source', '==', 'system')
+            ));
+            if (alreadyOpen.empty) {
+              autoIssuedRef.current.add(stallDoc.id);
+              await addDoc(collection(db, 'issues'), {
+                restroomId: stall.restroomId,
+                stallId: stallDoc.id,
+                type: 'sensor_glitch' as IssueType,
+                status: 'pending',
+                reportedAt: serverTimestamp(),
+                reportedBy: 'system',
+                source: 'system',
+                nodeLabel: stall.label,
+                scenario: 'node_offline',
+              });
+            }
+          }
+        }
+      }
+    );
+
     return () => {
       unsubscribeB();
       unsubscribeR();
       unsubscribeS();
       unsubscribeI();
+      unsubscribeE();
     };
   }, []);
 

@@ -34,6 +34,8 @@ export interface Stall {
   status: StallStatus;
   lastOccupiedAt?: Timestamp;
   occupancyCount: number;
+  /** Physical sensor hardware ID — used to match incoming sensor_events */
+  nodeId?: string;
 }
 
 export interface Issue {
@@ -59,4 +61,16 @@ export interface UserProfile {
   email: string;
   isAdmin: boolean;
   lastSeenAt?: Timestamp;
+}
+
+export type SensorEventType = 'in_use' | 'vacant' | 'offline' | 'online';
+
+export interface SensorEvent {
+  id: string;
+  /** Matches Stall.nodeId — the physical hardware identifier */
+  nodeId: string;
+  event: SensorEventType;
+  timestamp: Timestamp;
+  /** Set to true once the app has processed this event */
+  processed?: boolean;
 }

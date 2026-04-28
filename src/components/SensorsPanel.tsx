@@ -293,6 +293,7 @@ const StallForm: React.FC<StallFormProps> = ({ initial, restroomId, onSave, onCl
   const [label, setLabel]   = useState(initial?.label  ?? '');
   const [type, setType]     = useState<StallType>(initial?.type ?? 'stall');
   const [status, setStatus] = useState(initial?.status ?? 'online');
+  const [nodeId, setNodeId] = useState(initial?.nodeId ?? '');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -304,6 +305,7 @@ const StallForm: React.FC<StallFormProps> = ({ initial, restroomId, onSave, onCl
       type,
       status: status as 'online' | 'offline',
       occupancyCount: initial?.occupancyCount ?? 0,
+      ...(nodeId.trim() && { nodeId: nodeId.trim() }),
     });
     setSaving(false);
     onClose();
@@ -339,6 +341,20 @@ const StallForm: React.FC<StallFormProps> = ({ initial, restroomId, onSave, onCl
         </div>
 
         <div className="space-y-1.5">
+          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+            Hardware Node ID <span className="opacity-40 normal-case font-medium">(optional)</span>
+          </label>
+          <input
+            value={nodeId}
+            onChange={e => setNodeId(e.target.value)}
+            placeholder="e.g. MBB-1F-M-S01"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm font-mono focus:outline-none focus:border-sky-500/50"
+          />
+          <p className="text-[9px] text-slate-600 font-medium">Matches the nodeId your partner’s sensor hardware sends</p>
+        </div>
+
+        <div className="space-y-1.5">
+
           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</label>
           <div className="flex gap-2">
             {STALL_TYPES.map(t => (
@@ -551,12 +567,15 @@ export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls, is
                     <p className="text-[9px] font-black uppercase tracking-widest mt-0.5 text-slate-500">
                       {s.type} · {s.occupancyCount} uses
                     </p>
+                    {s.nodeId && (
+                      <p className="text-[9px] font-mono text-sky-500/70 mt-0.5">{s.nodeId}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {/* Toggle status */}
                   <button
-                    onClick={() => toggleStallStatus(s)}
+                    onClick={e => { e.stopPropagation(); toggleStallStatus(s); }}
                     title={s.status === 'online' ? 'Set Offline' : 'Set Online'}
                     className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
                       s.status === 'online'
@@ -567,14 +586,14 @@ export const SensorsPanel: React.FC<Props> = ({ buildings, restrooms, stalls, is
                     {s.status === 'online' ? '● Online' : '○ Offline'}
                   </button>
                   <button
-                    onClick={() => setStallForm({ open: true, editing: s })}
+                    onClick={e => { e.stopPropagation(); setStallForm({ open: true, editing: s }); }}
                     className="p-1.5 text-slate-600 hover:text-sky-400 rounded-lg transition-colors"
                     title="Edit"
                   >
                     <Edit2 size={14} />
                   </button>
                   <button
-                    onClick={() => deleteStall(s)}
+                    onClick={e => { e.stopPropagation(); deleteStall(s); }}
                     className="p-1.5 text-slate-600 hover:text-red-500 rounded-lg transition-colors"
                     title="Delete"
                   >
