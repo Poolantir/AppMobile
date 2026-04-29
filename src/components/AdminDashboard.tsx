@@ -155,6 +155,17 @@ export const AdminDashboard: React.FC = () => {
 
     const unsubscribeS = onSnapshot(query(collection(db, 'stalls')), (snapshot) => {
       setStalls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Stall)));
+      // Convert in_use status → online + increment count (partner hardware sends in_use as status)
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type !== 'modified' && change.type !== 'added') return;
+        const data = change.doc.data();
+        if (data.status === 'in_use') {
+          await updateDoc(change.doc.ref, {
+            status: 'online',
+            occupancyCount: increment(1),
+          });
+        }
+      });
     });
 
     const unsubscribeI = onSnapshot(query(collection(db, 'issues'), orderBy('reportedAt', 'desc')), (snapshot) => {
@@ -166,11 +177,12 @@ export const AdminDashboard: React.FC = () => {
     // Maps nodeId → stall and updates status/count in real-time.
     const processedEventsSet = new Set<string>();
     const unsubscribeE = onSnapshot(
-      query(collection(db, 'sensor_events'), where('processed', '!=', true), orderBy('processed'), orderBy('timestamp', 'asc')),
+      query(collection(db, 'sensor_events'), orderBy('timestamp', 'asc')),
       async (snapshot) => {
         for (const change of snapshot.docChanges()) {
           if (change.type !== 'added') continue;
           const ev = { id: change.doc.id, ...change.doc.data() } as SensorEvent;
+          if (ev.processed === true) continue; // already handled
           if (processedEventsSet.has(ev.id)) continue;
           processedEventsSet.add(ev.id);
           // Find matching stall by nodeId
@@ -1004,6 +1016,30 @@ interface NodeUsageMapProps {
 }
 
 function NodeUsageMap({ buildings, restrooms, stalls, selectedId, onSelect }: NodeUsageMapProps) {
+  const [reorderingRoom, setReorderingRoom] = useState<string | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [localOrder, setLocalOrder] = useState<Record<string, string[]>>({});
+
+  const getSorted = (roomId: string, raw: Stall[]) => {
+    const ids = localOrder[roomId];
+    if (ids) return ids.map(id => raw.find(s => s.id === id)!).filter(Boolean);
+    return [...raw].sort((a, b) => (a.sortOrder ?? 9999) - (b.sortOrder ?? 9999) || a.label.localeCompare(b.label));
+  };
+
+  const move = async (roomId: string, stallId: string, dir: -1 | 1, roomStalls: Stall[]) => {
+    const sorted = getSorted(roomId, roomStalls);
+    const idx = sorted.findIndex(s => s.id === stallId);
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= sorted.length) return;
+    const reordered = [...sorted];
+    const [moved] = reordered.splice(idx, 1);
+    reordered.splice(newIdx, 0, moved);
+    setLocalOrder(prev => ({ ...prev, [roomId]: reordered.map(s => s.id) }));
+    await Promise.all(
+      reordered.map((s, i) => updateDoc(doc(db, 'stalls', s.id), { sortOrder: i }))
+    );
+  };
+
   if (buildings.length === 0) {
     return (
       <div className="py-16 text-center text-slate-600 text-xs font-bold uppercase tracking-widest">
@@ -1023,40 +1059,82 @@ function NodeUsageMap({ buildings, restrooms, stalls, selectedId, onSelect }: No
             <div className="space-y-3">
               {bRooms.map(r => {
                 const rStalls = stalls.filter(s => s.restroomId === r.id);
+                const sorted = getSorted(r.id, rStalls);
                 const maxUsage = Math.max(1, ...rStalls.map(s => s.occupancyCount));
+                const isReordering = reorderingRoom === r.id;
                 return (
                   <div key={r.id} className="p-4 bg-white/[0.02] rounded-2xl border border-white/5">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-3">{r.name}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {rStalls.map(s => {
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-600">{r.name}</p>
+                      {rStalls.length > 1 && (
+                        <button
+                          onClick={() => { setReorderingRoom(isReordering ? null : r.id); setPickedId(null); }}
+                          className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all ${
+                            isReordering
+                              ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40'
+                              : 'text-slate-600 hover:text-slate-400 border border-white/5 hover:border-white/10'
+                          }`}
+                        >
+                          {isReordering ? 'Done' : '⠿ Arrange'}
+                        </button>
+                      )}
+                    </div>
+                    {isReordering && (
+                      <p className="text-[8px] text-sky-500/60 font-medium mb-2">
+                        {pickedId ? 'Tap ‹ › to move, or tap another node to pick it' : 'Tap a node to select it, then use ‹ › arrows'}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2 items-end">
+                      {sorted.map((s, idx) => {
                         const isOffline = s.status === 'offline';
                         const intensity = isOffline ? 0 : s.occupancyCount / maxUsage;
-                        // Color: offline=red, low=slate, high=sky→emerald
                         const bg = isOffline
                           ? 'rgba(239,68,68,0.7)'
                           : `rgba(${Math.round(56 + (16 - 56) * intensity)},${Math.round(189 + (185 - 189) * intensity)},${Math.round(248 + (129 - 248) * intensity)},${0.15 + intensity * 0.7})`;
                         const border = isOffline ? 'border-red-500/50' : intensity > 0.6 ? 'border-sky-500/40' : 'border-white/10';
-                        // Node size scales with usage (32–52px)
-                        const size = Math.round(32 + intensity * 20);
+                        const size = isReordering ? 44 : Math.round(32 + intensity * 20);
+                        const isPicked = pickedId === s.id;
                         return (
-                          <div
-                            key={s.id}
-                            onClick={() => onSelect(s)}
-                            title={`${s.label} · ${s.occupancyCount} uses${isOffline ? ' · OFFLINE' : ''}`}
-                            className={`relative flex flex-col items-center justify-center rounded-xl border transition-all cursor-pointer ${
-                              selectedId === s.id
-                                ? 'ring-2 ring-white/50 ring-offset-1 ring-offset-transparent scale-110'
-                                : 'hover:scale-105'
-                            } ${border}`}
-                            style={{ width: size, height: size, backgroundColor: bg }}
-                          >
-                            <span className="text-[7px] font-black text-white/70 leading-tight text-center px-0.5 truncate w-full text-center">
-                              {s.type === 'urinal' ? 'U' : 'S'}{s.label.match(/(\d+)$/)?.[1] ?? ''}
-                            </span>
-                            <span className="text-[7px] text-white/50 font-bold leading-none">{s.occupancyCount}</span>
-                            {isOffline && (
-                              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-[#0f172a] animate-pulse" />
+                          <div key={s.id} className="flex flex-col items-center gap-1">
+                            {/* Arrow row — only for picked node */}
+                            {isReordering && isPicked && (
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => move(r.id, s.id, -1, rStalls)}
+                                  disabled={idx === 0}
+                                  className="w-5 h-5 rounded bg-sky-500/20 text-sky-400 text-[10px] font-black flex items-center justify-center disabled:opacity-20 active:bg-sky-500/40"
+                                >‹</button>
+                                <button
+                                  onClick={() => move(r.id, s.id, 1, rStalls)}
+                                  disabled={idx === sorted.length - 1}
+                                  className="w-5 h-5 rounded bg-sky-500/20 text-sky-400 text-[10px] font-black flex items-center justify-center disabled:opacity-20 active:bg-sky-500/40"
+                                >›</button>
+                              </div>
                             )}
+                            {isReordering && !isPicked && <div className="h-6" />}
+                            <div
+                              onClick={() => {
+                                if (isReordering) { setPickedId(isPicked ? null : s.id); }
+                                else { onSelect(s); }
+                              }}
+                              title={`${s.label} · ${s.occupancyCount} uses${isOffline ? ' · OFFLINE' : ''}`}
+                              className={`relative flex flex-col items-center justify-center rounded-xl border transition-all cursor-pointer ${
+                                isPicked
+                                  ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-[#0f172a] scale-110'
+                                  : selectedId === s.id && !isReordering
+                                  ? 'ring-2 ring-white/50 ring-offset-1 ring-offset-[#0f172a] scale-110'
+                                  : 'hover:scale-105'
+                              } ${border}`}
+                              style={{ width: size, height: size, backgroundColor: bg }}
+                            >
+                              <span className="text-[7px] font-black text-white/70 leading-tight text-center px-0.5 truncate w-full text-center">
+                                {s.type === 'urinal' ? 'U' : 'S'}{s.label.match(/(\d+)$/)?.[1] ?? ''}
+                              </span>
+                              <span className="text-[7px] text-white/50 font-bold leading-none">{s.occupancyCount}</span>
+                              {isOffline && (
+                                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-[#0f172a] animate-pulse" />
+                              )}
+                            </div>
                           </div>
                         );
                       })}

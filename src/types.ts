@@ -36,6 +36,8 @@ export interface Stall {
   occupancyCount: number;
   /** Physical sensor hardware ID — used to match incoming sensor_events */
   nodeId?: string;
+  /** Admin-set display order within a restroom (0 = leftmost) */
+  sortOrder?: number;
 }
 
 export interface Issue {

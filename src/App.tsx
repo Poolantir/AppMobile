@@ -174,9 +174,7 @@ export default function App() {
         <nav className="sticky top-0 z-50 bg-[#0f172a] border-b border-white/[0.06] rounded-none px-6 py-4" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-sky-500 rounded-lg">
-                <Droplets className="text-[#0f172a]" size={24} />
-              </div>
+              <img src="/poolantir_icon 1.svg" alt="Poolantir" className="h-9 w-9" />
               <span className="text-xl font-bold text-white tracking-tight">Poolantir</span>
             </div>
             
